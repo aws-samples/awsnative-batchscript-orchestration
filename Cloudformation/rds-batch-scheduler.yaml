@@ -1,0 +1,542 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: "Blog- Replace self-managed database scheduler batch jobs using AWS native solutions"
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: 'Network and Security'
+        Parameters:
+          - VPC
+          - Subnet
+          - RDSSecurityGroup
+
+    ParameterGroups:
+      - Label:
+          default: 'RDS Credentials'
+        Parameters:
+          - RDSHostName
+          - RDSsid
+          - RDSport
+          - RDSUsername
+          - RDSPassword
+          
+      - Label:
+          default: 'Other Settings'
+        Parameters:
+          - TopicName
+          - DynamoDBTableName
+
+Parameters:
+  VPC:
+    Type: 'AWS::EC2::VPC::Id'
+    Description : "VPCs for the Batch Instance"
+    Default : "vpc-245ae759"
+
+  Subnet:
+    Type: 'List<AWS::EC2::Subnet::Id>'
+    Description : "Subnet List for the Batch Instance"
+    Default : "subnet-5c355803"
+
+  RDSSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup::Id'
+    Description: "Security Group for the RDS instance"
+    Default : "sg-79a3b776"
+
+  DynamoDBTableName:
+    Type: String
+    Description : "DynamoDB Table Name"
+    Default : rds-batch
+
+  TopicName:
+    Type: String
+    Description:  "Topic Name"
+    Default: SNSNotify
+    
+  RDSSecretName:
+    Description: EC2 instance type on which IDE runs
+    Default : "rds-secret"
+    Type: String
+
+
+  RDSHostName:
+    Type: String
+    Description : "RDS Host Name"
+
+  RDSsid:
+    Type: String
+    Description : "RDS sid"
+    Default: orcl
+
+  RDSport:
+    Type: String
+    Description : "RDS port#"
+    Default: "1521"
+
+  RDSUsername:
+    Type: String
+    Description : "RDS UserName"
+
+  RDSPassword:
+    Type: String
+    Description : "RDS Password"
+
+
+Resources:
+
+  S3Bucket:
+    Type: 'AWS::S3::Bucket'
+    Properties:
+      BucketName: !Sub  "rdsbatch-bucket-${AWS::AccountId}-${AWS::Region}"
+      AccessControl: Private
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+  RDSSecret:
+    Type: 'AWS::SecretsManager::Secret'
+    Properties:
+      Name: !Ref RDSSecretName
+      SecretString: !Join
+          - "\n"
+          - - '{'
+            - !Sub ' "host": "${RDSHostName}",'
+            - !Sub ' "sid": "${RDSsid}",'
+            - !Sub ' "port": "${RDSport}",'
+            - !Sub ' "username": "${RDSUsername}",'
+            - !Sub ' "password": "${RDSPassword}"'
+            - '}'
+
+  DynamoDBTable: 
+      Type: AWS::DynamoDB::Table
+      Properties: 
+        KeySchema: 
+          - 
+            AttributeName: JobName
+            KeyType: HASH        
+        AttributeDefinitions: 
+          - 
+            AttributeName: JobName
+            AttributeType: S
+        ProvisionedThroughput: 
+          ReadCapacityUnits: 1
+          WriteCapacityUnits: 1
+        TableName: !Ref DynamoDBTableName
+
+  rdsbatchecr:
+    Type: AWS::ECR::Repository
+    Properties:
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      RepositoryName: !Sub  "rdsbatch-ecr-${AWS::AccountId}-${AWS::Region}"
+      
+  JobServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: rds-batch-JobServiceRole
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSBatchServiceRole
+        - arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role
+        - arn:aws:iam::aws:policy/CloudWatchEventsFullAccess
+      Policies:
+        -
+          PolicyName: SecretManager
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              -
+                Effect: "Allow"
+                Action: [
+                 "secretsmanager:Get*" ,
+                 "secretsmanager:List*"
+                ]
+                Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:rds-secret*"
+ 
+  BatchServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: rds-batch-InstanceServiceRole
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: batch.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSBatchServiceRole
+
+
+  IamInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+      - Ref: EcsInstanceRole
+
+  EcsInstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2008-10-17
+        Statement:
+          - Sid: ""
+            Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role
+
+  
+  JobDefinition:
+    Type: AWS::Batch::JobDefinition
+    Properties:
+      Type: container
+      ContainerProperties:
+        Image: !Sub  "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/rdsbatch-ecr-${AWS::AccountId}-${AWS::Region}:latest"  
+        Vcpus: 2
+        Memory: 2000
+        JobRoleArn: !GetAtt JobServiceRole.Arn
+      RetryStrategy:
+        Attempts: 1
+
+  JobQueue:
+    Type: AWS::Batch::JobQueue
+    Properties:
+      Priority: 1
+      ComputeEnvironmentOrder:
+        - Order: 1
+          ComputeEnvironment:
+            Ref: ComputeEnvironment
+  
+  BatchSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+        GroupDescription: Security Group for Batch Instances
+        VpcId: !Ref VPC
+  
+  
+  ComputeEnvironment:
+    Type: AWS::Batch::ComputeEnvironment
+    Properties:
+      Type: MANAGED
+      ComputeResources:
+        Type: EC2
+        MinvCpus: 2
+        DesiredvCpus: 2
+        MaxvCpus: 4
+        InstanceTypes:
+          - optimal
+        Subnets: !Ref Subnet
+        SecurityGroupIds: [!Ref  BatchSecurityGroup]
+        InstanceRole: !Ref IamInstanceProfile
+      ServiceRole: !Ref BatchServiceRole
+      
+
+  S3BucketPolicy:
+      Type: AWS::S3::BucketPolicy
+      Properties:
+        Bucket: !Sub  "rdsbatch-bucket-${AWS::AccountId}-${AWS::Region}"
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+            - Sid: Polic123
+              Effect: Allow
+              Action: 
+                - 's3:Get*'
+                - 's3:List*'
+              Resource:
+                - !Sub "arn:aws:s3:::rdsbatch-bucket-${AWS::AccountId}-${AWS::Region}/*"
+                - !Sub "arn:aws:s3:::rdsbatch-bucket-${AWS::AccountId}-${AWS::Region}"
+              Principal: 
+                AWS: !Join ['',['arn:aws:iam::',!Ref 'AWS::AccountId',':role/rds-batch-JobServiceRole']]
+
+  MySNSTopic: 
+    Type: AWS::SNS::Topic
+    Properties: 
+      TopicName: !Ref TopicName  
+
+# IAM role for the Step Functions State Machine
+  StateMachineIAMRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: rds-batch-StateMachineRole
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: "Allow"
+            Principal:
+              Service: !Sub "states.${AWS::Region}.amazonaws.com"
+            Action:  "sts:AssumeRole"
+
+      Policies:
+        -
+          PolicyName: StatesExecutionPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              -
+                Effect: "Allow"
+                Action: "sns:Publish" 
+                Resource: !Sub "arn:aws:sns:${AWS::Region}:${AWS::AccountId}:${TopicName}"
+              -
+                Effect: "Allow"
+                Action:  [
+                "dynamodb:GetItem",
+                "dynamodb:PutItem",
+                "dynamodb:UpdateItem",
+                "dynamodb:DeleteItem" ]
+                Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${DynamoDBTableName}"
+              -
+                Effect: Allow
+                Action: states:*
+                Resource: "*"
+              -
+                Effect: Allow
+                Action: ["batch:SubmitJob",
+                "batch:DescribeJobs",
+                "batch:TerminateJob"]
+                Resource: "*"
+              -
+                Effect: Allow
+                Action: ["events:PutTargets",
+                "events:PutRule",
+                "events:DescribeRule"]
+                Resource: 
+                - !Sub "arn:aws:events:${AWS::Region}:${AWS::AccountId}:rule/StepFunctionsGetEventsForBatchJobsRule"
+
+  RDSStateMachine:
+    Type: AWS::StepFunctions::StateMachine
+    Properties:
+      StateMachineName: rds-batch-StateMachine
+      RoleArn:  !GetAtt StateMachineIAMRole.Arn
+      DefinitionString: !Join
+          - "\n"
+          - - '{'
+            - ' "Comment": "A description of my state machine",'
+            - '                    "StartAt": "Parallel",'
+            - '                    "States": {'
+            - '                      "Parallel": {'
+            - '                        "Type": "Parallel",'
+            - '                        "Branches": ['
+            - '                          {'
+            - '                            "StartAt": "GetInfo-Test123",'
+            - '                            "States": {'
+            - '                              "GetInfo-Test123": {'
+            - '                                "Type": "Task",'
+            - '                                "Resource": "arn:aws:states:::dynamodb:getItem",'
+            - '                                "Parameters": {'
+            - !Sub '                            "TableName": "${DynamoDBTable}",'
+            - '                                 "Key": {'
+            - '                                  "JobName": {'
+            - '                                      "S": "Test123"'
+            - '                                    }'
+            - '                                  }'
+            - '                                },'
+            - '                                "Next": "RunBatch-Test123"'
+            - '                              },'
+            - '                              "RunBatch-Test123": {'
+            - '                                "Type": "Task",'
+            - '                                "Resource": "arn:aws:states:::batch:submitJob.sync",'
+            - '                                "Parameters": {'
+            - '                                  "ContainerOverrides": {'
+            - '                                    "Environment": ['
+            - '                                      {'
+            - '                                        "Name": "BATCH_FILE_S3_URL",'
+            - '                                        "Value.$": "$.Item.ScriptLocation.S"'
+            - '                                      }'
+            - '                                    ]'
+            - '                                  },'
+            - '                                  "JobName.$": "$.Item.JobName.S",'
+            - '                                  "JobDefinition.$": "$.Item.JobDefinition.S",'
+            - '                                  "JobQueue.$": "$.Item.JobQueue.S"'
+            - '                                },'
+            - '                                "End": true'
+            - '                              }'
+            - '                            }'
+            - '                          },'
+            - '                          {'
+            - '                            "StartAt": "GetInfo-Test124",'
+            - '                            "States": {'
+            - '                              "GetInfo-Test124": {'
+            - '                                "Type": "Task",'
+            - '                                "Resource": "arn:aws:states:::dynamodb:getItem",'
+            - '                                "Parameters": {'
+            - !Sub '                            "TableName": "${DynamoDBTable}",'
+            - '                                  "Key": {'
+            - '                                    "JobName": {'
+            - '                                      "S": "Test124"'
+            - '                                    }'
+            - '                                  }'
+            - '                                },'
+            - '                                "Next": "RunBatch-Test124"'
+            - '                              },'
+            - '                              "RunBatch-Test124": {'
+            - '                                "Type": "Task",'
+            - '                                "Resource": "arn:aws:states:::batch:submitJob.sync",'
+            - '                                "Parameters": {'
+            - '                                  "ContainerOverrides": {'
+            - '                                    "Environment": ['
+            - '                                     {'
+            - '                                        "Name": "BATCH_FILE_S3_URL",'
+            - '                                        "Value.$": "$.Item.ScriptLocation.S"'
+            - '                                       }'
+            - '                                    ]'
+            - '                                  },'
+            - '                                  "JobName.$": "$.Item.JobName.S",'
+            - '                                  "JobDefinition.$": "$.Item.JobDefinition.S",'
+            - '                                  "JobQueue.$": "$.Item.JobQueue.S"'
+            - '                                },'
+            - '                                "End": true'
+            - '                              }'
+            - '                            }'
+            - '                          }'
+            - '                        ],'
+            - '                        "Next": "GetInfo-Test125",'
+            - '                        "Catch": ['
+            - '                          {'
+            - '                            "ErrorEquals": ['
+            - '                              "States.ALL"'
+            - '                            ],'
+            - '                            "Comment": "AllError",'
+            - '                            "Next": "SNS Publish"'
+            - '                          }'
+            - '                        ]'
+            - '                      },'
+            - '                      "GetInfo-Test125": {'
+            - '                        "Type": "Task",'
+            - '                        "Resource": "arn:aws:states:::dynamodb:getItem",'
+            - '                        "Parameters": {'
+            - !Sub '                   "TableName": "${DynamoDBTable}",'
+            - '                          "Key": {'
+            - '                            "JobName": {'
+            - '                              "S": "Test125"'
+            - '                            }'
+            - '                          }'
+            - '                        },'
+            - '                        "Next": "RunBatch-Test125"'
+            - '                      },'
+            - '                      "SNS Publish": {'
+            - '                        "Type": "Task",'
+            - '                        "Resource": "arn:aws:states:::sns:publish",'
+            - '                        "Parameters": {'
+            - '                          "Message.$": "$",'
+            - !Sub '                     "TopicArn": "arn:aws:sns:${AWS::Region}:${AWS::AccountId}:${TopicName}"'
+            - '                        },'
+            - '                        "End": true'
+            - '                      },'
+            - '                      "RunBatch-Test125": {'
+            - '                        "Type": "Task",'
+            - '                        "Resource": "arn:aws:states:::batch:submitJob.sync",'
+            - '                        "Parameters": {'
+            - '                          "ContainerOverrides": {'
+            - '                            "Environment": ['
+            - '                              {'
+            - '                                "Name": "BATCH_FILE_S3_URL",'
+            - '                                "Value.$": "$.Item.ScriptLocation.S"'
+            - '                              }'
+            - '                            ]'
+            - '                          },'
+            - '                          "JobName.$": "$.Item.JobName.S",'
+            - '                          "JobDefinition.$": "$.Item.JobDefinition.S",'
+            - '                          "JobQueue.$": "$.Item.JobQueue.S"'
+            - '                        },'
+            - '                        "End": true,'
+            - '                        "Catch": ['
+            - '                          {'
+            - '                            "ErrorEquals": ['
+            - '                              "States.ALL"'
+            - '                            ],'
+            - '                            "Comment": "AllError",'
+            - '                            "Next": "SNS Publish"'
+            - '                          }'
+            - '                        ]'
+            - '                      }'
+            - '                    }'
+            - '                  }'
+
+  ScheduledEventIAMRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: "Allow"
+            Principal:
+              Service:
+                  - Fn::Sub: "events.amazonaws.com"
+            Action:
+              - "sts:AssumeRole"
+      Policies:
+        -
+          PolicyName: StateMachineExecutionPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              -
+                Effect: "Allow"
+                Action: "states:StartExecution"
+                Resource: !GetAtt RDSStateMachine.Arn
+
+  ScheduledEventRule:
+    Type: "AWS::Events::Rule"
+    Properties:
+      Name: rds-batch-every10minutes
+      Description: "Scheduled event to trigger Step Functions state machine"
+      ScheduleExpression: "rate(10 minutes)"
+      State: "DISABLED"
+      Targets:
+        -
+          Arn: !Ref RDSStateMachine
+          Id: !GetAtt RDSStateMachine.Name
+          RoleArn: !GetAtt ScheduledEventIAMRole.Arn
+
+  InboundRule:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      IpProtocol: tcp
+      FromPort: 1521
+      ToPort: 1521
+      SourceSecurityGroupId: !GetAtt BatchSecurityGroup.GroupId  
+      GroupId: !Ref  RDSSecurityGroup  
+            
+Outputs:
+  BucketName:
+    Value: !Ref S3Bucket
+  RDSSecret:
+    Value: !Ref RDSSecret
+  DynamoDBTable:
+    Value: !Ref  DynamoDBTable
+  rdsbatchecr:
+    Value: !Ref rdsbatchecr
+  ComputeEnvironmentArn:
+    Value: !Ref ComputeEnvironment
+  JobQueueArn:
+    Value: !Ref  JobQueue 
+  JobDefinitionArn:
+    Value: !Ref  JobDefinition
+  ScheduledEventIAMRole:
+    Value: !Ref ScheduledEventIAMRole
+  ScheduledEventRule:
+    Value: !Ref ScheduledEventRule
+  RDSStateMachine:
+    Value: !Ref RDSStateMachine
+  StateMachineIAMRole:
+    Value: !Ref StateMachineIAMRole
+  MyTopic: 
+    Value: !Ref MySNSTopic

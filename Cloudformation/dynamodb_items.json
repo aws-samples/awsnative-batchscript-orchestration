@@ -1,0 +1,34 @@
+{
+    "rds-batch": [
+        {
+            "PutRequest": {
+                "Item": {
+                    "JobName": {"S":"Test123"},
+                    "JobDefinition": {"S":"<jobdefinition ARN>"},
+                    "JobQueue": {"S":"<JobQueue ARN>"},
+                    "ScriptLocation": {"S":"<S3 SQL File location>"}
+                }
+            }
+        },
+                {
+            "PutRequest": {
+                "Item": {
+                    "JobName": {"S":"Test124"},
+                    "JobDefinition": {"S":"<jobdefinition ARN>"},
+                    "JobQueue": {"S":"<JobQueue ARN>"},
+                    "ScriptLocation": {"S":"<S3 SQL File location>"}
+                }
+            }
+        },
+                {
+            "PutRequest": {
+                "Item": {
+                    "JobName": {"S":"Test125"},
+                    "JobDefinition": {"S":"<jobdefinition ARN>"},
+                    "JobQueue": {"S":"<JobQueue ARN>"},
+                    "ScriptLocation": {"S":"<S3 SQL File location>"}
+                }
+            }
+        }
+    ]
+}

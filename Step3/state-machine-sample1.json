@@ -1,0 +1,42 @@
+{
+  "Comment": "A description of my state machine",
+  "StartAt": "RDSBatch-Primary",
+  "States": {
+    "RDSBatch-Primary": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::batch:submitJob.sync",
+      "Parameters": {
+        "JobName": "MyRDSJob-Primary",
+        "JobDefinition": "arn:aws:batch:us-east-1:xxxxxxx:job-definition/rds-batch:1",
+        "JobQueue": "arn:aws:batch:us-east-1:xxxxxxx:job:job-queue/mybatchqueue",
+        "ContainerOverrides": {
+          "Environment": [
+            {
+              "Name": "BATCH_FILE_S3_URL",
+              "Value": "s3://rdsbatch-123-useast1/rds_batch_sql1.sh"
+            }
+          ]
+        }
+      },
+      "Next": "RDSBatch-Dependent"
+    },
+    "RDSBatch-Dependent": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::batch:submitJob.sync",
+      "Parameters": {
+        "JobName": "MyRDSJob-Secondary",
+        "JobDefinition": "arn:aws:batch:us-east-1:xxxxxxx:job:job-definition/rds-batch:1",
+        "JobQueue": "arn:aws:batch:us-east-1:xxxxxxx:job:job-queue/mybatchqueue",
+        "ContainerOverrides": {
+          "Environment": [
+            {
+              "Name": "BATCH_FILE_S3_URL",
+              "Value": "s3://rdsbatch-123-useast1/rds_batch_sql1.sh"
+            }
+          ]
+        }
+      },
+      "End": true
+    }
+  }
+}
