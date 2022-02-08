@@ -1,6 +1,3 @@
-// Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
-// SPDX-License-Identifier: MIT-0
-
 FROM oraclelinux:8-slim
 RUN microdnf install oracle-instantclient-release-el8 && \
     microdnf install oracle-instantclient-basic oracle-instantclient-devel oracle-instantclient-sqlplus   && \
