@@ -10,8 +10,6 @@ Metadata:
           - VPC
           - Subnet
           - RDSSecurityGroup
-
-    ParameterGroups:
       - Label:
           default: 'RDS Credentials'
         Parameters:
@@ -22,10 +20,15 @@ Metadata:
           - RDSPassword
           
       - Label:
-          default: 'Other Settings'
+          default: 'Other Deafult Settings.'
         Parameters:
           - TopicName
           - DynamoDBTableName
+          - JobServiceRoleName
+          - BatchServiceRoleName
+          - StateMachineName
+          
+          
 
 Parameters:
   VPC:
@@ -80,8 +83,31 @@ Parameters:
   RDSPassword:
     Type: String
     Description : "RDS Password"
+    
+  JobServiceRoleName:
+    Type: String
+    Default: rds-batch-JobServiceRole
+    Description : "Batch Job Service Role Name"
 
-
+  BatchServiceRoleName:
+    Type: String
+    Default: rds-batch-InstanceServiceRole
+    Description : "Batch Compute Service Role Name"
+    
+    
+  StateMachineIAMRoleName:
+    Type: String
+    Default: rds-batch-StateMachineRole
+    Description : "State Machine Service Role Name"  
+    
+    
+  StateMachineName:
+    Type: String
+    Default: rds-batch-StateMachine
+    Description : "State Machine Service Role Name"   
+    
+        
+    
 Resources:
 
   S3Bucket:
@@ -112,10 +138,12 @@ Resources:
             - !Sub ' "username": "${RDSUsername}",'
             - !Sub ' "password": "${RDSPassword}"'
             - '}'
+      KmsKeyId: !Ref KMSKeyAlias
 
   DynamoDBTable: 
       Type: AWS::DynamoDB::Table
       Properties: 
+        BillingMode: PROVISIONED
         KeySchema: 
           - 
             AttributeName: JobName
@@ -128,6 +156,10 @@ Resources:
           ReadCapacityUnits: 1
           WriteCapacityUnits: 1
         TableName: !Ref DynamoDBTableName
+        PointInTimeRecoverySpecification:
+          PointInTimeRecoveryEnabled: True
+        SSESpecification:
+          SSEEnabled: True
 
   rdsbatchecr:
     Type: AWS::ECR::Repository
@@ -139,7 +171,7 @@ Resources:
   JobServiceRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: rds-batch-JobServiceRole
+      RoleName: !Ref JobServiceRoleName
       AssumeRolePolicyDocument:
         Version: 2012-10-17
         Statement:
@@ -168,7 +200,7 @@ Resources:
   BatchServiceRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: rds-batch-InstanceServiceRole
+      RoleName: !Ref BatchServiceRoleName
       AssumeRolePolicyDocument:
         Version: 2012-10-17
         Statement:
@@ -221,12 +253,18 @@ Resources:
         - Order: 1
           ComputeEnvironment:
             Ref: ComputeEnvironment
-  
+            
+               
   BatchSecurityGroup:
     Type: 'AWS::EC2::SecurityGroup'
     Properties:
-        GroupDescription: Security Group for Batch Instances
+        GroupDescription: "Security Group for Batch Instances"
+        SecurityGroupEgress:
+            - CidrIp: 0.0.0.0/24
+              IpProtocol: "-1"
+              Description: "Allowing outbound from Btach instances for all ports"  
         VpcId: !Ref VPC
+        
   
   
   ComputeEnvironment:
@@ -243,7 +281,7 @@ Resources:
         Subnets: !Ref Subnet
         SecurityGroupIds: [!Ref  BatchSecurityGroup]
         InstanceRole: !Ref IamInstanceProfile
-      ServiceRole: !Ref BatchServiceRole
+      ServiceRole: !GetAtt BatchServiceRole.Arn
       
 
   S3BucketPolicy:
@@ -263,17 +301,53 @@ Resources:
                 - !Sub "arn:aws:s3:::rdsbatch-bucket-${AWS::AccountId}-${AWS::Region}"
               Principal: 
                 AWS: !Join ['',['arn:aws:iam::',!Ref 'AWS::AccountId',':role/rds-batch-JobServiceRole']]
+                
+  KMSKey:
+    Type: 'AWS::KMS::Key'
+    Properties:
+      Description: KMS Key Policy
+      Enabled: true
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: 2012-10-17
+        Id: KmsKeyPolicy
+        Statement:
+          - Sid: SimpleKeyPolicyAllowAccountAdmin
+            Effect: Allow
+            Principal:
+              AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root"
+            Action:
+              - 'kms:*'
+            Resource: '*'
+          - Sid: SimpleKeyPolicyAllowAccountUsage
+            Effect: Allow
+            Principal:
+              AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root"
+            Action:
+              - 'kms:Decrypt'
+              - 'kms:Encrypt'
+              - 'kms:GenerateDataKey*'
+              - 'kms:DescribeKey'
+            Resource: '*'
+
+
+  KMSKeyAlias:
+    Type: "AWS::KMS::Alias"
+    Properties:
+      AliasName: !Sub "alias/${AWS::StackName}-SNSEncryptionKey"
+      TargetKeyId: !Ref KMSKey
 
   MySNSTopic: 
     Type: AWS::SNS::Topic
     Properties: 
-      TopicName: !Ref TopicName  
+      TopicName: !Ref TopicName
+      KmsMasterKeyId: !Ref KMSKey
 
 # IAM role for the Step Functions State Machine
   StateMachineIAMRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: rds-batch-StateMachineRole
+      RoleName: !Ref StateMachineIAMRoleName
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -303,14 +377,21 @@ Resources:
                 Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${DynamoDBTableName}"
               -
                 Effect: Allow
-                Action: states:*
-                Resource: "*"
+                Action: [
+                "states:Describe*",
+                "states:List*",
+                "states:Stop*",
+                "states:Send*",
+                "states:Start*" ]
+                Resource: !Sub "arn:aws:states:${AWS::Region}:${AWS::AccountId}::stateMachine:${StateMachineName}"
               -
                 Effect: Allow
                 Action: ["batch:SubmitJob",
                 "batch:DescribeJobs",
                 "batch:TerminateJob"]
-                Resource: "*"
+                Resource: 
+                  - !Ref JobDefinition
+                  - !Ref JobQueue
               -
                 Effect: Allow
                 Action: ["events:PutTargets",
@@ -322,7 +403,7 @@ Resources:
   RDSStateMachine:
     Type: AWS::StepFunctions::StateMachine
     Properties:
-      StateMachineName: rds-batch-StateMachine
+      StateMachineName: !Ref StateMachineName
       RoleArn:  !GetAtt StateMachineIAMRole.Arn
       DefinitionString: !Join
           - "\n"
@@ -478,8 +559,7 @@ Resources:
           -
             Effect: "Allow"
             Principal:
-              Service:
-                  - Fn::Sub: "events.amazonaws.com"
+              Service: "events.amazonaws.com"
             Action:
               - "sts:AssumeRole"
       Policies:
@@ -509,11 +589,14 @@ Resources:
   InboundRule:
     Type: AWS::EC2::SecurityGroupIngress
     Properties:
+      Description: "Open database port for RDS and Batch Instance communication"  
       IpProtocol: tcp
-      FromPort: 1521
-      ToPort: 1521
+      FromPort: !Ref RDSport
+      ToPort: !Ref RDSport
       SourceSecurityGroupId: !GetAtt BatchSecurityGroup.GroupId  
       GroupId: !Ref  RDSSecurityGroup  
+            
+            
             
 Outputs:
   BucketName:
