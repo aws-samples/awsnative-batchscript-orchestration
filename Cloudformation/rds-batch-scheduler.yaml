@@ -335,7 +335,7 @@ Resources:
   KMSKeyAlias:
     Type: "AWS::KMS::Alias"
     Properties:
-      AliasName: !Sub "alias/${AWS::StackName}-SNSEncryptionKey"
+      AliasName: !Sub "alias/${AWS::StackName}-EncryptionKey"
       TargetKeyId: !Ref KMSKey
 
   MySNSTopic: 
