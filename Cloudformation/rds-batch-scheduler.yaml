@@ -25,26 +25,24 @@ Metadata:
           - TopicName
           - DynamoDBTableName
           - JobServiceRoleName
-          - BatchServiceRoleName
-          - StateMachineName
-          
+          - StateMachineName    
           
 
 Parameters:
   VPC:
     Type: 'AWS::EC2::VPC::Id'
     Description : "VPCs for the Batch Instance"
-    Default : "vpc-245ae759"
+    Default : "vpc-0b0ab4117144130e0"
 
   Subnet:
     Type: 'List<AWS::EC2::Subnet::Id>'
     Description : "Subnet List for the Batch Instance"
-    Default : "subnet-5c355803"
+    Default : "subnet-0f59c7a5e78dcfe97"
 
   RDSSecurityGroup:
     Type: 'AWS::EC2::SecurityGroup::Id'
     Description: "Security Group for the RDS instance"
-    Default : "sg-79a3b776"
+    Default : "sg-028cb5e749ad3b5a1"
 
   DynamoDBTableName:
     Type: String
@@ -88,13 +86,7 @@ Parameters:
     Type: String
     Default: rds-batch-JobServiceRole
     Description : "Batch Job Service Role Name"
-
-  BatchServiceRoleName:
-    Type: String
-    Default: rds-batch-InstanceServiceRole
-    Description : "Batch Compute Service Role Name"
-    
-    
+   
   StateMachineIAMRoleName:
     Type: String
     Default: rds-batch-StateMachineRole
@@ -185,7 +177,7 @@ Resources:
         - arn:aws:iam::aws:policy/CloudWatchEventsFullAccess
       Policies:
         -
-          PolicyName: SecretManager
+          PolicyName: rds-batch-SecretManager
           PolicyDocument:
             Version: "2012-10-17"
             Statement:
@@ -197,43 +189,7 @@ Resources:
                 ]
                 Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:rds-secret*"
  
-  BatchServiceRole:
-    Type: AWS::IAM::Role
-    Properties:
-      RoleName: !Ref BatchServiceRoleName
-      AssumeRolePolicyDocument:
-        Version: 2012-10-17
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: batch.amazonaws.com
-            Action: sts:AssumeRole
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSBatchServiceRole
-
-
-  IamInstanceProfile:
-    Type: AWS::IAM::InstanceProfile
-    Properties:
-      Roles:
-      - Ref: EcsInstanceRole
-
-  EcsInstanceRole:
-    Type: AWS::IAM::Role
-    DeletionPolicy: Retain
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: 2008-10-17
-        Statement:
-          - Sid: ""
-            Effect: Allow
-            Principal:
-              Service: ec2.amazonaws.com
-            Action: sts:AssumeRole
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role
-
-  
+ 
   JobDefinition:
     Type: AWS::Batch::JobDefinition
     Properties:
@@ -241,7 +197,7 @@ Resources:
       ContainerProperties:
         Image: !Sub  "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/rdsbatch-ecr-${AWS::AccountId}-${AWS::Region}:latest"  
         Vcpus: 2
-        Memory: 2000
+        Memory: 256
         JobRoleArn: !GetAtt JobServiceRole.Arn
       RetryStrategy:
         Attempts: 1
@@ -255,13 +211,34 @@ Resources:
           ComputeEnvironment:
             Ref: ComputeEnvironment
             
+         
+ 
+  BatchEcsInstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2008-10-17
+        Statement:
+          - Sid: ""
+            Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role
+
+  BatchIamInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+      - Ref: BatchEcsInstanceRole            
                
   BatchSecurityGroup:
     Type: 'AWS::EC2::SecurityGroup'
     Properties:
         GroupDescription: "Security Group for Batch Instances"
         SecurityGroupEgress:
-            - CidrIp: 0.0.0.0/24
+            - CidrIp: 0.0.0.0/0
               IpProtocol: "-1"
               Description: "Allowing outbound from Btach instances for all ports"  
         VpcId: !Ref VPC
@@ -272,17 +249,19 @@ Resources:
     Type: AWS::Batch::ComputeEnvironment
     Properties:
       Type: MANAGED
+      ComputeEnvironmentName: rds-batch
+      State: ENABLED
       ComputeResources:
-        Type: EC2
-        MinvCpus: 2
-        DesiredvCpus: 2
-        MaxvCpus: 4
-        InstanceTypes:
-          - optimal
-        Subnets: !Ref Subnet
+        MaxvCpus: 48
         SecurityGroupIds: [!Ref  BatchSecurityGroup]
-        InstanceRole: !Ref IamInstanceProfile
-      ServiceRole: !GetAtt BatchServiceRole.Arn
+        Type: EC2
+        Subnets: !Ref Subnet
+        MinvCpus: 4
+        InstanceRole: !Ref BatchIamInstanceProfile
+        InstanceTypes: 
+        - optimal
+        Tags: {"Name" : "Batch Instance - rds-batch"}
+        DesiredvCpus: 12
       
 
   S3BucketPolicy:
@@ -452,8 +431,13 @@ Resources:
             - '                            }'
             - '                          },'
             - '                          {'
-            - '                            "StartAt": "GetInfo-Test124",'
+            - '                            "StartAt": "Wait",'
             - '                            "States": {'
+            - '                                "Wait": {'
+            - '                                "Type": "Wait",'
+            - '                                "Seconds": 30,'
+            - '                                "Next": "GetInfo-Test124"'
+            - '                                },'
             - '                              "GetInfo-Test124": {'
             - '                                "Type": "Task",'
             - '                                "Resource": "arn:aws:states:::dynamodb:getItem",'
