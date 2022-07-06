@@ -309,6 +309,14 @@ Resources:
               - 'kms:GenerateDataKey*'
               - 'kms:DescribeKey'
             Resource: '*'
+          - Sid: BatchJobKeyAccess
+            Effect: Allow
+            Principal:
+              AWS: !Sub "arn:aws:iam::${AWS::AccountId}:role/rds-batch-JobServiceRole"
+            Action:
+              - 'kms:Decrypt'
+              - 'kms:DescribeKey'
+            Resource: '*'
 
 
   KMSKeyAlias:
