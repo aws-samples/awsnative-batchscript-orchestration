@@ -239,8 +239,15 @@ Resources:
         GroupDescription: "Security Group for Batch Instances"
         SecurityGroupEgress:
             - CidrIp: 0.0.0.0/0
-              IpProtocol: "-1"
-              Description: "Allowing outbound from Btach instances for all ports"  
+              IpProtocol: TCP
+              FromPort: 443
+              ToPort: 443
+              Description: "Allowing outbound from Batch instances for 443 ports"  
+            - CidrIp: 0.0.0.0/0
+              IpProtocol: TCP
+              FromPort: !Ref RDSport
+              ToPort: !Ref RDSport
+              Description: "Allowing outbound for Database port "  
         VpcId: !Ref VPC
         
   
@@ -312,7 +319,7 @@ Resources:
           - Sid: BatchJobKeyAccess
             Effect: Allow
             Principal:
-              AWS: !Sub "arn:aws:iam::${AWS::AccountId}:role/rds-batch-JobServiceRole"
+              AWS: !Sub "arn:aws:iam::${AWS::AccountId}:role/${JobServiceRoleName}"
             Action:
               - 'kms:Decrypt'
               - 'kms:DescribeKey'
