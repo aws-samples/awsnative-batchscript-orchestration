@@ -42,8 +42,13 @@
           }
         },
         {
-          "StartAt": "GetInfo-Test124",
+          "StartAt": "Wait",
           "States": {
+            "Wait": {
+              "Type": "Wait",
+              "Seconds": 30,
+              "Next": "GetInfo-Test124"
+            },
             "GetInfo-Test124": {
               "Type": "Task",
               "Resource": "arn:aws:states:::dynamodb:getItem",
@@ -107,7 +112,7 @@
       "Resource": "arn:aws:states:::sns:publish",
       "Parameters": {
         "Message.$": "$",
-        "TopicArn": "arn:aws:sns:us-east-1:XXXXXXX:BatchNotify"
+        "TopicArn": "arn:aws:sns:us-east-1:567133706458:SNSNotify"
       },
       "End": true
     },
