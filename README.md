@@ -6,7 +6,7 @@ To avoid the tightly coupled batch scheduling with database architecture, you ca
 
 In this post, we present a solution that provides extensibility and portability across databases by parameterizing your batch requirements and scale without additional development efforts. You can use this solution to run various SQL scripts, shell or bash scripts, AWS Command Line Interface (AWS CLI) commands, or scripts built using programming languages such as Python, PySpark, Scala, or Java. This solution can help developers and scheduling teams decouple batch scheduling from your database and reuse it across different use cases. One additional benefit of this solution is the reusability of the script—you can have jobs that run across multiple databases, for example a tablespace utilization job.
 
-This repository has the sample scripts that you can use to follow the blog "Replace self-managed database scheduler batch jobs using AWS native solutions" instructions.
+This GitHub repository has sample scripts for the blog "Replace self-managed database scheduler batch jobs using AWS native solutions".
 
 
 
