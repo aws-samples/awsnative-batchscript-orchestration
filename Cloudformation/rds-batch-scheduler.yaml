@@ -201,7 +201,7 @@ Resources:
                 ]
                 Resource: !GetAtt KMSKey.Arn 
                 
-         -
+        -
           PolicyName: rds-batch-s3access
           PolicyDocument:
             Version: "2012-10-17"
