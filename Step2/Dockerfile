@@ -11,7 +11,7 @@ RUN microdnf clean all
 CMD ["sqlplus", "-v"]     
 ADD fetch_and_run_s3script.sh /usr/local/bin/fetch_and_run_s3script.sh
 RUN chmod 755 /usr/local/bin/fetch_and_run_s3script.sh
-ENV BATCH_FILE_S3_URL="s3://rdsbatch-123-useast1/rds_batch_sql1.sh"
+ENV BATCH_FILE_S3_URL="s3://rdsbatch-123-567133706458/rds_batch_sql1.sh"
 WORKDIR /tmp
 USER nobody
 ENTRYPOINT ["/usr/local/bin/fetch_and_run_s3script.sh"]
