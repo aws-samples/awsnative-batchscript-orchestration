@@ -187,9 +187,38 @@ Resources:
                  "secretsmanager:Get*" ,
                  "secretsmanager:List*"
                 ]
-                Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:rds-secret*"
- 
- 
+                Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:rds-secret*"        
+        -
+          PolicyName: rds-batch-kmsusage
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              -
+                Effect: "Allow"
+                Action: [
+                  "kms:Decrypt",
+                  "kms:DescribeKey"
+                ]
+                Resource: !GetAtt KMSKey.Arn 
+                
+         -
+          PolicyName: rds-batch-s3access
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              -
+                Effect: "Allow"
+                Action: [
+                  "s3:Get*",
+                  "s3:List*"
+                ]
+                Resource:                 
+                - !Sub "arn:aws:s3:::rdsbatch-bucket-${AWS::AccountId}-${AWS::Region}/*"
+                - !Sub "arn:aws:s3:::rdsbatch-bucket-${AWS::AccountId}-${AWS::Region}"              
+                
+                
+                
+
   JobDefinition:
     Type: AWS::Batch::JobDefinition
     Properties:
@@ -271,24 +300,7 @@ Resources:
         DesiredvCpus: 12
       
 
-  S3BucketPolicy:
-      Type: AWS::S3::BucketPolicy
-      Properties:
-        Bucket: !Sub  "rdsbatch-bucket-${AWS::AccountId}-${AWS::Region}"
-        PolicyDocument:
-          Version: '2012-10-17'
-          Statement:
-            - Sid: Polic123
-              Effect: Allow
-              Action: 
-                - 's3:Get*'
-                - 's3:List*'
-              Resource:
-                - !Sub "arn:aws:s3:::rdsbatch-bucket-${AWS::AccountId}-${AWS::Region}/*"
-                - !Sub "arn:aws:s3:::rdsbatch-bucket-${AWS::AccountId}-${AWS::Region}"
-              Principal: 
-                AWS: !Join ['',['arn:aws:iam::',!Ref 'AWS::AccountId',':role/rds-batch-JobServiceRole']]
-                
+               
   KMSKey:
     Type: 'AWS::KMS::Key'
     Properties:
@@ -316,14 +328,7 @@ Resources:
               - 'kms:GenerateDataKey*'
               - 'kms:DescribeKey'
             Resource: '*'
-          - Sid: BatchJobKeyAccess
-            Effect: Allow
-            Principal:
-              AWS: !Sub "arn:aws:iam::${AWS::AccountId}:role/${JobServiceRoleName}"
-            Action:
-              - 'kms:Decrypt'
-              - 'kms:DescribeKey'
-            Resource: '*'
+
 
 
   KMSKeyAlias:

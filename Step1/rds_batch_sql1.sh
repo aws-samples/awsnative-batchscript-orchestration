@@ -2,7 +2,7 @@ echo "This is a test SQL Script written in shell!."
 echo on
 echo `date`
 #The below line extracts the Database credentials from the Secret Store
-data=$(aws secretsmanager get-secret-value --secret-id rds-secret --query SecretString --output text --region=us-west-2 ) 
+data=$(aws secretsmanager get-secret-value --secret-id rds-secret --query SecretString --output text --region=us-east-1 ) 
 host=$(echo $data | awk -F"," '{print $1}' | awk -F":" '{print $2}' |  tr -d '"')
 sid=$(echo $data | awk -F"," '{print $2}' | awk -F":" '{print $2}' |  tr -d '"')
 port=$(echo $data | awk -F"," '{print $3}' | awk -F":" '{print $2}' |  tr -d '"')
